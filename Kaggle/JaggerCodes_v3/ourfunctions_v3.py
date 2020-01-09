@@ -8,6 +8,7 @@ import pickle
 from sklearn.model_selection import GridSearchCV
 import time
 import os
+import peakutils
 
 # if there are any NaN values, we should remove those samples
 def clean_nan_samples(spectrum, targets, c, cat):
@@ -21,6 +22,101 @@ def clean_nan_samples(spectrum, targets, c, cat):
         Y = targets.iloc[:, c].to_numpy().reshape(-1,)
         X = spectrum.copy(deep=True)
     return X, Y
+
+
+def remove_noise(df):
+    N = len(df)  # number of samples
+    idx_list = []
+    for idx in range(N):
+        intensity = df[['intensity']].iloc[idx].values[0]
+        if np.var(intensity) < 100:
+            idx_list.append(idx)
+            print('Training sample', idx, ' eliminated')
+    new_df = df.drop(index = idx_list)
+    return new_df
+
+
+def interpolate_spectra(df, m, M, step_size):
+    # step_size is the size of each step; 1 interpolates very well.
+    mz_range = np.arange(m, M + 1, step_size)
+
+    N = len(df)  # number of samples
+    L = len(mz_range)  # length of new spectrum (number of bins)
+    all_data = np.zeros((N, L))
+
+    for idx in range(N):
+        intensity = df[['intensity']].iloc[idx].values[0]
+        mzcoord = df[['coord_mz']].iloc[idx].values[0]
+        interpolated_spectrum = np.interp(x=mz_range, xp=mzcoord, fp=intensity)
+        interpolated_spectrum = interpolated_spectrum / np.max(interpolated_spectrum)
+        all_data[idx, :] = interpolated_spectrum
+    new_df = pd.DataFrame(data=all_data, columns=mz_range, index=df.index)
+    return new_df
+
+
+def spectrum_in_bins_2(df, m, M, bin_size): # new version
+    # Now, let's define the mz ranges, and the label associated to each of them (the mean of the limiting values of each bin)
+    range_min = []; range_max = []; range_mean = []
+    for mz in range(m,M,bin_size):
+        range_min.append(mz)
+        range_max.append(mz+bin_size)
+        range_mean.append(np.mean([range_min[-1],range_max[-1]]).astype(int))
+    N = len(df)  # number of samples
+    L = len(range_min)  # length of new spectrum (number of bins)
+    all_data = np.zeros((N,L))
+    for idx in range(N):
+        intensity = df[['intensity']].iloc[idx].values[0]
+        mzcoord   = df[['coord_mz']].iloc[idx].values[0]
+        idx_data_in_bins = np.zeros((1,L))
+        for i,mz in enumerate(range_min):
+            intensity_range = intensity[(mzcoord > mz) & (mzcoord < (mz+bin_size))]
+            if len(intensity_range) > 0 :
+                # as we are interested in peak values, let's keep the maximum value in the interval
+                idx_data_in_bins[0,i] = np.max(intensity_range)
+            else: # if those mz coordinates are not in that spectrum we interpolate
+                idx_data_in_bins[0,i] = np.interp(x=range_mean[i],xp=mzcoord,fp=intensity)
+
+        # Normalize the amplitude of the spectrum
+        idx_data_in_bins[0,:] = idx_data_in_bins[0,:] / np.max(idx_data_in_bins[0,:])
+        all_data[idx,:] = idx_data_in_bins
+    new_df = pd.DataFrame(data=all_data, columns = range_mean, index = df.index)
+    return new_df
+
+
+def spectrum_in_bins_3(df, m, M, bin_size): # incorporates baseline removal
+    # Now, let's define the mz ranges, and the label associated to each of them (the mean of the limiting values of each bin)
+    range_min = []; range_max = []; range_mean = []
+    for mz in range(m,M,bin_size):
+        range_min.append(mz)
+        range_max.append(mz+bin_size)
+        range_mean.append(np.mean([range_min[-1],range_max[-1]]).astype(int))
+    N = len(df)  # number of samples
+    L = len(range_min)  # length of new spectrum (number of bins)
+    all_data = np.zeros((N,L))
+    for idx in range(N):
+        intensity = df[['intensity']].iloc[idx].values[0]
+        mzcoord   = df[['coord_mz']].iloc[idx].values[0]
+        idx_data_in_bins = np.zeros((1,L))
+        for i,mz in enumerate(range_min):
+            intensity_range = intensity[(mzcoord > mz) & (mzcoord < (mz+bin_size))]
+            if len(intensity_range) > 0 :
+                # as we are interested in peak values, let's keep the maximum value in the interval
+                idx_data_in_bins[0,i] = np.max(intensity_range)
+            else: # if those mz coordinates are not in that spectrum we interpolate
+                idx_data_in_bins[0,i] = np.interp(x=range_mean[i],xp=mzcoord,fp=intensity)
+
+        # Normalize the amplitude of the spectrum
+        idx_data_in_bins[0,:] = idx_data_in_bins[0,:] / np.max(idx_data_in_bins[0,:])
+        # Remove baseline
+        idx_data_in_bins[0,:] -= peakutils.baseline(idx_data_in_bins[0,:],deg=4)
+        # Store in matrix
+        all_data[idx,:] = idx_data_in_bins
+    new_df = pd.DataFrame(data=all_data, columns = range_mean, index = df.index)
+    return new_df
+
+
+
+
 
 
 def try_clf(clf, params, spectrum_train, targets_train, n_cv=5, njobs=5,
