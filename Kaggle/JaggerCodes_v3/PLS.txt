@@ -1,0 +1,16 @@
+https://stackoverflow.com/questions/18390150/pls-da-algorithm-in-python
+
+Normal PLS regression can be used with binary classes.
+
+Alternatively, a dummy matrix can be used as:
+Y = [ 0 1 0] ; dummy = [ 1 0 1 ; 0 1 0]
+
+
+
+https://www.mfitzp.com/article/partial-least-squares-discriminant-analysis-plsda/
+Use PLS directly with the binary Y vector.
+
+
+PLS Canonical seems to be used for several Y 
+(that is, if we wanted to analyze all antibiotics at the same time)
+--> anyway, I think Im not using it properly
