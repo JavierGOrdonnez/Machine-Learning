@@ -54,6 +54,123 @@ def interpolate_spectra(df, m, M, step_size):
     return new_df
 
 
+def spectrum_in_peaks(spectrum, peaks):
+    df = spectrum.copy()
+    spectrum = spectrum.to_numpy()
+    new_spectrum = np.zeros((spectrum.shape[0], len(peaks)))
+
+    for i, x in enumerate(spectrum):
+        spectrum_train_aux = x[peaks]
+        new_spectrum[i, :] = spectrum_train_aux
+
+    new_df = pd.DataFrame(data=new_spectrum, columns=df.columns.values[peaks], index=df.index)
+    return new_df
+
+
+def spectrum_in_bins_4(df, m, M, bin_size): # first remove baseline and then normalization
+    # Now, let's define the mz ranges, and the label associated to each of them (the mean of the limiting values of each bin)
+    range_min = []; range_max = []; range_mean = []
+    for mz in range(m,M,bin_size):
+        range_min.append(mz)
+        range_max.append(mz+bin_size)
+        range_mean.append(np.mean([range_min[-1],range_max[-1]]).astype(int))
+    N = len(df)  # number of samples
+    L = len(range_min)  # length of new spectrum (number of bins)
+    all_data = np.zeros((N,L))
+    for idx in range(N):
+        intensity = df[['intensity']].iloc[idx].values[0]
+        mzcoord   = df[['coord_mz']].iloc[idx].values[0]
+        idx_data_in_bins = np.zeros((1,L))
+        for i,mz in enumerate(range_min):
+            intensity_range = intensity[(mzcoord > mz) & (mzcoord < (mz+bin_size))]
+            if len(intensity_range) > 0 :
+                # as we are interested in peak values, let's keep the maximum value in the interval
+                idx_data_in_bins[0,i] = np.max(intensity_range)
+            else: # if those mz coordinates are not in that spectrum we interpolate
+                idx_data_in_bins[0,i] = np.interp(x=range_mean[i],xp=mzcoord,fp=intensity)
+
+        # Remove baseline
+        idx_data_in_bins[0,:] -= peakutils.baseline(idx_data_in_bins[0,:],deg=4)
+        # Normalize the amplitude of the spectrum
+        idx_data_in_bins[0,:] = idx_data_in_bins[0,:] / np.max(idx_data_in_bins[0,:])
+        # Store in matrix
+        all_data[idx,:] = idx_data_in_bins
+    new_df = pd.DataFrame(data=all_data, columns = range_mean, index = df.index)
+    return new_df
+
+
+def binned_spectrums_lowarea(df, m_lowarea, M_lowarea, bin_size_lowarea, m, M, bin_size, SAME_NORMALIZATION=False):
+    # SPECTRUM IN BINS FOR NORMAL RANGE
+    range_min = [];
+    range_max = [];
+    range_mean = []
+    for mz in range(m, M, bin_size):
+        range_min.append(mz)
+        range_max.append(mz + bin_size)
+        range_mean.append(np.mean([range_min[-1], range_max[-1]]).astype(int))
+
+    N = len(df)  # number of samples
+    L = len(range_min)  # length of new spectrum (number of bins)
+    all_data = np.zeros((N, L))
+    normaliz_cst = np.zeros((N,))
+    for idx in range(N):
+        intensity = df[['intensity']].iloc[idx].values[0]
+        mzcoord = df[['coord_mz']].iloc[idx].values[0]
+        idx_data_in_bins = np.zeros((L,))
+        for i, mz in enumerate(range_min):
+            intensity_range = intensity[(mzcoord > mz) & (mzcoord < (mz + bin_size))]
+            if len(intensity_range) > 0:
+                # as we are interested in peak values, let's keep the maximum value in the interval
+                idx_data_in_bins[i] = np.max(intensity_range)
+            else:  # if those mz coordinates are not in that spectrum we interpolate
+                idx_data_in_bins[i] = np.interp(x=range_mean[i], xp=mzcoord, fp=intensity)
+
+        # Remove baseline
+        idx_data_in_bins -= peakutils.baseline(idx_data_in_bins, deg=4)
+        # Normalize the amplitude of the spectrum
+        normaliz_cst[idx] = np.max(idx_data_in_bins)
+        idx_data_in_bins = idx_data_in_bins / normaliz_cst[idx]
+        # Store in matrix
+        all_data[idx, :] = idx_data_in_bins.reshape(1, -1)
+    new_df = pd.DataFrame(data=all_data, columns=range_mean, index=df.index)
+
+    # VERY SIMILAR CODE FOR "LOW AREA"
+    range_min_lowarea = [];
+    range_max_lowarea = [];
+    range_mean_lowarea = []
+    for mz in range(m_lowarea, M_lowarea, bin_size_lowarea):
+        range_min_lowarea.append(mz)
+        range_max_lowarea.append(mz + bin_size_lowarea)
+        range_mean_lowarea.append(np.mean([range_min_lowarea[-1], range_max_lowarea[-1]]).astype(int))
+    N = len(df)  # number of samples
+    L = len(range_min_lowarea)  # length of new spectrum (number of bins)
+    all_data_lowarea = np.zeros((N, L))
+    for idx in range(N):
+        intensity = df[['intensity']].iloc[idx].values[0]
+        mzcoord = df[['coord_mz']].iloc[idx].values[0]
+        idx_data_in_bins = np.zeros((L,))
+        for i, mz in enumerate(range_min_lowarea):
+            intensity_range = intensity[(mzcoord > mz) & (mzcoord < (mz + bin_size_lowarea))]
+            if len(intensity_range) > 0:
+                # as we are interested in peak values, let's keep the maximum value in the interval
+                idx_data_in_bins[i] = np.max(intensity_range)
+            else:  # if those mz coordinates are not in that spectrum we interpolate
+                idx_data_in_bins[i] = np.interp(x=range_mean[i], xp=mzcoord, fp=intensity)
+
+        # Remove baseline
+        idx_data_in_bins -= peakutils.baseline(idx_data_in_bins, deg=4)
+        # Normalize the amplitude of the spectrum
+        if SAME_NORMALIZATION:
+            idx_data_in_bins = idx_data_in_bins / normaliz_cst[
+                idx]  # same normaliz_cst than on the other part of the spectrum
+        else:
+            idx_data_in_bins = idx_data_in_bins / np.max(idx_data_in_bins)
+        # Store in matrix
+        all_data_lowarea[idx, :] = idx_data_in_bins.reshape(1, -1)
+    new_df_lowarea = pd.DataFrame(data=all_data_lowarea, columns=range_mean_lowarea, index=df.index)
+    return new_df, new_df_lowarea
+
+
 def spectrum_in_bins_2(df, m, M, bin_size): # new version
     # Now, let's define the mz ranges, and the label associated to each of them (the mean of the limiting values of each bin)
     range_min = []; range_max = []; range_mean = []
